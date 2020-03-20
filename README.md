@@ -2,8 +2,8 @@
 
 `ip address show` (`ip a`) and `ip route show` (`ip r`) more or less give all
 the information a user could want about a network's setup. Usually, they just
-want to know about IP addresses, MAC addresses and maybe my default gateway, so
-I just threw all that together in one place:
+want to know about IP addresses, MAC addresses and maybe the default gateway,
+so I just threw all that together in one place:
 
 ```
 $ ipshow
