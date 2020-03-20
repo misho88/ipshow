@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+
+import netifaces
+from socket import AF_PACKET, AF_INET, AF_INET6
+from ipaddress import ip_address, ip_interface
+from blessed import Terminal
+
+terminal = Terminal()
+
+DEFAULT = '---'
+SEP = '  '
+COLUMN_NAMES = {
+    'interface': 'Interface',
+    'addr': 'Address',
+    'netmask': 'Netmask',
+    'broadcast': 'Broadcast',
+    'gateway': 'Gateway'
+}
+FAMILY_NAMES = {
+    AF_PACKET: 'MAC',
+    AF_INET: 'IP',
+    AF_INET6: 'IPv6',
+}
+
+
+def get_data():
+    data = {
+        interface: netifaces.ifaddresses(interface)
+        for interface in netifaces.interfaces()
+    }
+    gwdata = netifaces.gateways()
+
+    # add in the gateway information next to whichever addresses are in the
+    # same subnet
+    for interface, details in data.items():
+        for family, address_info in details.items():
+            if family not in gwdata:
+                continue
+            for gateway, gwinterface, default in gwdata[family]:
+                if gwinterface != interface:
+                    continue
+                g = int(ip_address(gateway))
+                for info in address_info:
+                    if not ('addr' in info and 'netmask' in info):
+                        continue
+                    a = int(ip_address(info['addr']))
+                    try:
+                        m = int(ip_address(info['netmask']))
+                    except ValueError:
+                        m = int(ip_interface(info['netmask']).netmask)
+                    if a & m == g & m:
+                        info['gateway'] = f'{gateway}*' if default else gateway
+    return data
+
+
+def shortmask(netmask):
+    netmask = int(ip_address(netmask))
+    for w in range(netmask.bit_length()):
+        if netmask | (1 << w) == netmask:
+            break
+    return f'/{w}'
+
+
+def clean(family, key, data):
+    if data == DEFAULT:
+        return data
+    if family == AF_INET:
+        if key == 'netmask':
+            return shortmask(data)
+    if family == AF_INET6:
+        if key == 'addr':
+            try:
+                return data[:data.index('%')]
+            except ValueError:
+                return data
+        if key == 'netmask':
+            try:
+                return data[data.index('/'):]
+            except ValueError:
+                return data
+    return data
+
+
+def print_data(data, family, keys):
+    clean_data = {
+        interface: [
+            {
+                key: clean(family, key, info.get(key, DEFAULT))
+                for key in keys
+            }
+            for info in details.get(family, [{}])
+        ]
+        for interface, details in data.items()
+        if family in details
+    }
+
+    interface_len = max(len(i) for i in clean_data.keys())
+    interface_len = max(interface_len, len(COLUMN_NAMES['interface']))
+
+    column_lens = { key: max(
+        len(item[key])
+        for details in clean_data.values()
+        for item in details
+    ) for key in keys }
+    column_lens = {
+        key: max(value, len(COLUMN_NAMES[key]))
+        for key, value in column_lens.items()
+    }
+
+    bold = terminal.bold
+    print(terminal.bold_orange(FAMILY_NAMES[family]))
+    print(
+        bold(COLUMN_NAMES['interface'].rjust(interface_len)),
+        *(bold(COLUMN_NAMES[key].ljust(column_lens[key])) for key in keys),
+        sep=SEP,
+    )
+    for interface, details in clean_data.items():
+        for detail in details:
+            print(
+                bold(interface.rjust(interface_len)),
+                *(detail[key].ljust(column_lens[key]) for key in keys),
+                sep=SEP,
+            )
+            interface = ''
+
+
+data = get_data()
+
+print_data(data, AF_INET, ('addr', 'netmask', 'broadcast', 'gateway'))
+print()
+print_data(data, AF_INET6, ('addr', 'netmask', 'gateway'))
+print()
+print_data(data, AF_PACKET, ('addr',))
