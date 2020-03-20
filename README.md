@@ -1,9 +1,9 @@
 # ipshow - Nicely-Formatted IP Information
 
 `ip address show` (`ip a`) and `ip route show` (`ip r`) more or less give all
-the information a user could want about your network's setup. Usually, I just
-want to know my IP addresses, MAC addresses and maybe my default gateway, so I
-threw all that together in one place:
+the information a user could want about a network's setup. Usually, they just
+want to know about IP addresses, MAC addresses and maybe my default gateway, so
+I just threw all that together in one place:
 
 ```
 $ ipshow
