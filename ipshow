@@ -55,10 +55,11 @@ def get_data():
 
 def shortmask(netmask):
     netmask = int(ip_address(netmask))
-    for w in range(netmask.bit_length()):
+    n = netmask.bit_length()
+    for w in range(n):
         if netmask | (1 << w) == netmask:
             break
-    return f'/{w}'
+    return f'/{n - w}'
 
 
 def clean(family, key, data):
