@@ -1,134 +1,78 @@
 #!/usr/bin/env python3
 
-import netifaces
-from socket import AF_PACKET, AF_INET, AF_INET6
-from ipaddress import ip_address, ip_interface
+from pysh import proc, wait, check, now, get, to
+import json
 from blessed import Terminal
+from collections import defaultdict
+from ipaddress import ip_address
+
+SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+
+
+def dash_default(dictlike):
+    return defaultdict(lambda: '---', **dictlike)
+
+
+start = to('ip -json {} show'.format) & proc.o
+finish = wait & check & get.stdout & to(json.loads)
+addr_data, route_data = ('addr', 'route') | +start | now | +finish
+
+interfaces = { d['ifname']: dash_default(d) for d in addr_data }
+for data in interfaces.values():
+    data['addr_info'] = [ dash_default(d) for d in data['addr_info'] ]
 
 terminal = Terminal()
+c_table_name = terminal.bold_orange
+c_heading = terminal.bold_white
+c_name = terminal.bold_white
+c_default = terminal.bold_yellow
+get_width = terminal.length
 
-DEFAULT = '---'
-SEP = '  '
-COLUMN_NAMES = {
-    'interface': 'Interface',
-    'addr': 'Address',
-    'netmask': 'Netmask',
-    'broadcast': 'Broadcast',
-    'gateway': 'Gateway'
-}
-FAMILY_NAMES = {
-    AF_PACKET: 'MAC',
-    AF_INET: 'IP',
-    AF_INET6: 'IPv6',
+STATUS = {
+    'UNKNOWN': '',
+    'UP': terminal.bold_green('  ✔ '),
+    'DOWN': terminal.bold_red('  ✘ '),
 }
 
 
-def get_data():
-    data = {
-        interface: netifaces.ifaddresses(interface)
-        for interface in netifaces.interfaces()
-    }
-    gwdata = netifaces.gateways()
+def justify(n):
+    if n > 0:
+        yield terminal.rjust
+    for _ in range(n - 2):
+        yield terminal.ljust
+    if n > 1:
+        yield lambda x, width: x
 
-    # add in the gateway information next to whichever addresses are in the
-    # same subnet
-    for interface, details in data.items():
-        for family, address_info in details.items():
-            if family not in gwdata:
+
+def print_table(rows):
+    widths = [ max(get_width(name) for name in column) for column in zip(*rows) ]
+    for row in rows:
+        print(*(just(cell, width) for just, cell, width in zip(justify(len(row)), row, widths)), sep='  ')
+
+
+for family, version in ('inet', 4), ('inet6', 6):
+    print(c_table_name(f'IPv{version}'))
+    rows = []
+    rows.append([ c_heading(n) for n in ('Interface', 'Address', 'Netmask', 'Broadcast', 'Gateway') ])
+    for name, data in interfaces.items():
+        for info in data['addr_info']:
+            if info['family'] != family:
                 continue
-            for gateway, gwinterface, default in gwdata[family]:
-                if gwinterface != interface:
-                    continue
-                g = int(ip_address(gateway))
-                for info in address_info:
-                    if not ('addr' in info and 'netmask' in info):
-                        continue
-                    a = int(ip_address(info['addr']))
-                    try:
-                        m = int(ip_address(info['netmask']))
-                    except ValueError:
-                        m = int(ip_interface(info['netmask']).netmask)
-                    if a & m == g & m:
-                        info['gateway'] = f'{gateway}*' if default else gateway
-    return data
+            gateways = [
+                (d['gateway'], c_default(SUPERSCRIPT[i]) if d['dst'] == 'default' else f' ({d["dst"]})')
+                for i, d in enumerate(route_data, start=1)
+                if 'gateway' in d and d['dev'] == name and ip_address(d['gateway']).version == version
+            ]
+            gateway = ', '.join(f'{k}{v}' for k, v in gateways) if gateways else '---'
+            rows.append([ c_name(name), info['local'], f'/{info["prefixlen"]}', info['broadcast'], gateway ])
+    print_table(rows)
+    print()
 
-
-def shortmask(netmask):
-    netmask = int(ip_address(netmask))
-    n = netmask.bit_length()
-    for w in range(n):
-        if netmask | (1 << w) == netmask:
-            break
-    return f'/{n - w}'
-
-
-def clean(family, key, data):
-    if data == DEFAULT:
-        return data
-    if family == AF_INET:
-        if key == 'netmask':
-            return shortmask(data)
-    if family == AF_INET6:
-        if key == 'addr':
-            try:
-                return data[:data.index('%')]
-            except ValueError:
-                return data
-        if key == 'netmask':
-            try:
-                return data[data.index('/'):]
-            except ValueError:
-                return data
-    return data
-
-
-def print_data(data, family, keys):
-    clean_data = {
-        interface: [
-            {
-                key: clean(family, key, info.get(key, DEFAULT))
-                for key in keys
-            }
-            for info in details.get(family, [{}])
-        ]
-        for interface, details in data.items()
-        if family in details
-    }
-
-    interface_len = max(len(i) for i in clean_data.keys())
-    interface_len = max(interface_len, len(COLUMN_NAMES['interface']))
-
-    column_lens = { key: max(
-        len(item[key])
-        for details in clean_data.values()
-        for item in details
-    ) for key in keys }
-    column_lens = {
-        key: max(value, len(COLUMN_NAMES[key]))
-        for key, value in column_lens.items()
-    }
-
-    bold = terminal.bold
-    print(terminal.bold_orange(FAMILY_NAMES[family]))
-    print(
-        bold(COLUMN_NAMES['interface'].rjust(interface_len)),
-        *(bold(COLUMN_NAMES[key].ljust(column_lens[key])) for key in keys),
-        sep=SEP,
-    )
-    for interface, details in clean_data.items():
-        for detail in details:
-            print(
-                bold(interface.rjust(interface_len)),
-                *(detail[key].ljust(column_lens[key]) for key in keys),
-                sep=SEP,
-            )
-            interface = ''
-
-
-data = get_data()
-
-print_data(data, AF_INET, ('addr', 'netmask', 'broadcast', 'gateway'))
-print()
-print_data(data, AF_INET6, ('addr', 'netmask', 'gateway'))
-print()
-print_data(data, AF_PACKET, ('addr',))
+print(c_table_name('MAC'))
+rows = []
+rows.append([ c_heading(n) for n in ('Interface', 'Address', 'Broadcast', 'Status') ])
+for name, data in interfaces.items():
+    status = data['operstate']
+    status = STATUS.get(status, status)
+    rows.append([ c_name(name), data['address'], data['broadcast'], status ])
+print_table(rows)
