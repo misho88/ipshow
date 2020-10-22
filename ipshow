@@ -6,16 +6,25 @@ from blessed import Terminal
 from collections import defaultdict
 from ipaddress import ip_address
 
-SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-
 
 def dash_default(dictlike):
     return defaultdict(lambda: '---', **dictlike)
 
 
+def make_color(n):
+    r, g, b = ((n >> s) & 0xFF for s in (16, 8, 0))
+    return r, g, b
+
+
 start = to('ip -json {} show'.format) & proc.o
 finish = wait & check & get.stdout & to(json.loads)
 addr_data, route_data = ('addr', 'route') | +start | now | +finish
+
+# I think this is probably the default anyway, but just in case:
+route_data = sorted(
+    route_data,
+    key=lambda d: (d.get('dst') != 'default', d['metric']),
+)
 
 interfaces = { d['ifname']: dash_default(d) for d in addr_data }
 for data in interfaces.values():
@@ -25,8 +34,17 @@ terminal = Terminal()
 c_table_name = terminal.bold_orange
 c_heading = terminal.bold_white
 c_name = terminal.bold_white
-c_default = terminal.bold_yellow
 get_width = terminal.length
+
+# let's assume there won't be more than 99 default routes
+SUPERSCRIPT = ( f'{a}{b}'.lstrip() for a in ' ¹²³⁴⁵⁶⁷⁸⁹' for b in '⁰¹²³⁴⁵⁶⁷⁸⁹' )
+SUPERSCRIPT = [
+    terminal.bold(terminal.color_rgb(*make_color(color))(num))
+    for color, num in zip(
+        (0xFFFFFF, 0x00FF00, 0xFFFF00, 0xFF7F00) + (0xFFFFFF,) * 96,
+        SUPERSCRIPT,
+    )
+]
 
 STATUS = {
     'UNKNOWN': '',
@@ -59,7 +77,7 @@ for family, version in ('inet', 4), ('inet6', 6):
             if info['family'] != family:
                 continue
             gateways = [
-                (d['gateway'], c_default(SUPERSCRIPT[i]) if d['dst'] == 'default' else f' ({d["dst"]})')
+                (d['gateway'], SUPERSCRIPT[i] if d['dst'] == 'default' else f' ({d["dst"]})')
                 for i, d in enumerate(route_data, start=1)
                 if 'gateway' in d and d['dev'] == name and ip_address(d['gateway']).version == version
             ]
