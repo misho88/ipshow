@@ -47,9 +47,9 @@ SUPERSCRIPT = [
 ]
 
 STATUS = {
-    'UNKNOWN': '',
-    'UP': terminal.bold_green('  ✔ '),
-    'DOWN': terminal.bold_red('  ✘ '),
+    'UNKNOWN': '---',
+    'UP': terminal.bold_green('up'),
+    'DOWN': terminal.bold_red('down'),
 }
 
 
