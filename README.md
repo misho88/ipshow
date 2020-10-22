@@ -31,3 +31,10 @@ MAC
     virbr0  52:54:00:87:55:eb
 virbr0-nic  52:54:00:87:55:eb
 ```
+
+## Requirements
+
+`pysh` which in turn needs `funcpipes`:
+
+https://github.com/misho88/pysh
+https://github.com/misho88/funcpipes
