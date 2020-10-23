@@ -1,10 +1,33 @@
 #!/usr/bin/env python3
 
-from pysh import proc, wait, check, now, get, to
+from pysh import run, proc, wait, check, now, get, to
 import json
 from blessed import Terminal
 from collections import defaultdict
 from ipaddress import ip_address
+
+
+def get_ifnames(raw):
+    for line in raw.splitlines():
+        tokens = line.split(maxsplit=1)
+        if tokens[0] == 'Interface':
+            yield tokens[1]
+
+
+def get_link(raw):
+    if raw == 'Not connected.\n':
+        return None
+    lines = raw.splitlines()
+    data = {}
+    tokens = lines[0].split()
+    data['remote'] = tokens[2]
+    for line in lines[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        key, val = line.split(':', maxsplit=1)
+        data[key.strip()] = val.strip()
+    return data
 
 
 def dash_default(dictlike):
@@ -20,6 +43,12 @@ start = to('ip -json {} show'.format) & proc.o
 finish = wait & check & get.stdout & to(json.loads)
 addr_data, route_data = ('addr', 'route') | +start | now | +finish
 
+start = to('iw dev {} link'.format) & proc.o
+finish = wait & get.stdout & to.decode & to(get_link)
+ifnames = run.o('iw dev') | check | get.stdout | to.decode | to(get_ifnames) | to(tuple)
+links = ifnames | +start | now | +finish | to(tuple)
+wifi = { ifname: link for ifname, link in zip(ifnames, links) if link is not None }
+
 # I think this is probably the default anyway, but just in case:
 route_data = sorted(
     route_data,
@@ -34,6 +63,9 @@ terminal = Terminal()
 c_table_name = terminal.bold_orange
 c_heading = terminal.bold_white
 c_name = terminal.bold_white
+c_up = terminal.bold_green
+c_down = terminal.bold_red
+c_right = to(terminal.bold) & terminal.color_rgb(0x9f, 0x90, 0xff)
 get_width = terminal.length
 
 # let's assume there won't be more than 99 default routes
@@ -48,8 +80,8 @@ SUPERSCRIPT = [
 
 STATUS = {
     'UNKNOWN': '---',
-    'UP': terminal.bold_green('up'),
-    'DOWN': terminal.bold_red('down'),
+    'UP': c_up('up'),
+    'DOWN': c_down('down'),
 }
 
 
@@ -77,7 +109,7 @@ for family, version in ('inet', 4), ('inet6', 6):
             if info['family'] != family:
                 continue
             gateways = [
-                (d['gateway'], SUPERSCRIPT[i] if d['dst'] == 'default' else f' ({d["dst"]})')
+                (d['gateway'], SUPERSCRIPT[i] if d['dst'] == 'default' else f'{c_right("→ ")}{d["dst"]}')
                 for i, d in enumerate(route_data, start=1)
                 if 'gateway' in d and d['dev'] == name and ip_address(d['gateway']).version == version
             ]
@@ -94,3 +126,24 @@ for name, data in interfaces.items():
     status = STATUS.get(status, status)
     rows.append([ c_name(name), data['address'], data['broadcast'], status ])
 print_table(rows)
+print()
+
+if wifi:
+    print(c_table_name('Wi-Fi'))
+    rows = []
+    rows.append([ c_heading(n) for n in ('Interface', 'SSID', 'Rate (Mb/s)', 'Frequency', 'Bandwidth', 'Rx Power') ])
+    for name, link in wifi.items():
+        freq = float(link['freq']) * 1e-3
+        freq = f'{freq:.03f} GHz'
+        try:
+            bw = next(tok[:-3] for tok in link['rx bitrate'].split() if tok.endswith('MHz'))
+            bw = f'{bw} MHz'
+        except StopIteration:
+            bw = '---'
+
+        rxrate = link['rx bitrate'].split(maxsplit=1)[0]
+        txrate = link['tx bitrate'].split(maxsplit=1)[0]
+        baudrate = f'{rxrate}{c_down("↓")} {txrate}{c_up("↑")}'
+
+        rows.append([ c_name(name), link['SSID'], baudrate, freq, bw, link['signal'] ])
+    print_table(rows)
