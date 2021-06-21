@@ -52,7 +52,7 @@ wifi = { ifname: link for ifname, link in zip(ifnames, links) if link is not Non
 # I think this is probably the default anyway, but just in case:
 route_data = sorted(
     route_data,
-    key=lambda d: (d.get('dst') != 'default', d['metric']),
+    key=lambda d: (d.get('dst') != 'default', d.get('metric', -1)),
 )
 
 interfaces = { d['ifname']: dash_default(d) for d in addr_data }
