@@ -71,7 +71,7 @@ get_width = terminal.length
 # let's assume there won't be more than 99 default routes
 SUPERSCRIPT = ( f'{a}{b}'.lstrip() for a in ' ¹²³⁴⁵⁶⁷⁸⁹' for b in '⁰¹²³⁴⁵⁶⁷⁸⁹' )
 SUPERSCRIPT = [
-    terminal.bold(terminal.color_rgb(*make_color(color))(num))
+    terminal.color_rgb(*make_color(color))(num)
     for color, num in zip(
         (0xFFFFFF, 0x00FF00, 0xFFFF00, 0xFF7F00) + (0xFFFFFF,) * 96,
         SUPERSCRIPT,
